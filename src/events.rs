@@ -4,7 +4,7 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 
 pub enum Event {
     Bt(BtEvent),
-    CoreXy(CoreXyEvent),
+    Move(CoreXyEvent),
     Engine(EngineEvent),
     BoardChanged(BoardChangeEvent),
 }
@@ -23,7 +23,7 @@ pub fn dispatcher(rx: EventReceiver, bt_tx: EventSender) -> anyhow::Result<()> {
                 // do things
                 bt_tx.send(Event::Bt(bt_event))?;
             }
-            Event::CoreXy(_core_event) => {
+            Event::Move(_core_event) => {
                 // do things
             }
             Event::Engine(_engine_event) => {
