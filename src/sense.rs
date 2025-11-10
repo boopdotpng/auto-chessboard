@@ -1,3 +1,4 @@
+use crate::events::{Event, EventSender};
 use esp_idf_svc::hal::i2c::I2cDriver;
 use std::time::{Duration, Instant};
 
@@ -57,10 +58,20 @@ impl Sense {
                     self.event_active = false;
                     self.event_mask = 0;
                     self.last_change = None;
+                    return Some(BoardChangeEvent {});
                 }
             }
         }  
 
         None
+    }
+
+    pub fn run(mut self, tx: EventSender) {
+        loop {
+            if let Some(evt) = self.tick(Instant::now()) {
+                let _ = tx.send(Event::BoardChanged(evt));
+            }
+            std::thread::sleep(Duration::from_millis(500));
+        }
     }
 }
