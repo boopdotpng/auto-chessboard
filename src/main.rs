@@ -1,16 +1,26 @@
 mod bluetooth;
 mod engine;
+mod motion;
 mod sense;
-use esp_idf_svc::hal::{self, peripheral::Peripheral};
+use sense::Sense;
+use esp_idf_svc::hal::prelude::*;
+use esp_idf_svc::hal::peripherals::Peripherals;
+use esp_idf_svc::hal::i2c::{I2cDriver, config::Config};
 
 fn main() {
     esp_idf_svc::sys::link_patches();
     esp_idf_svc::log::EspLogger::initialize_default();
 
     // one owner, pass from main
-    let peripherals = hal::peripherals::Peripherals::take().unwrap();
+    let peripherals = Peripherals::take().unwrap();
+    let pins = peripherals.pins;
 
-    let _sense = sense::Sense::new(peripherals.i2c0.into_ref(), 8);
+    let sda = pins.gpio2; let scl = pins.gpio3;
+
+    let config = Config::new().baudrate(100.kHz().into());
+    let i2c= I2cDriver::new(peripherals.i2c0, sda, scl, &config).unwrap();
+
+    let mut sense = Sense::new(i2c);
 
     // is this serial?
     log::info!("Hello, world!");
