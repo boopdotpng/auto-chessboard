@@ -17,6 +17,7 @@ fn main() {
 
     let sda = pins.gpio2; let scl = pins.gpio3;
 
+    // todo: change freq -- think max is 400
     let config = Config::new().baudrate(100.kHz().into());
     let i2c= I2cDriver::new(peripherals.i2c0, sda, scl, &config).unwrap();
 
