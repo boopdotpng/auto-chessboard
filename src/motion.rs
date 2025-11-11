@@ -51,7 +51,7 @@ where
     DirPin: Pin,
     EnPin: Pin,
 {
-    pos: u32,
+    pos: u32, 
     step: OutputPinDriver<'a, StepPin>,
     dir: OutputPinDriver<'a, DirPin>,
     en: OutputPinDriver<'a, EnPin>,
@@ -81,14 +81,14 @@ where
         self.en.set_low().unwrap();
         
         let period_us = 1_000_000u32 / freq_hz; 
-        let half = Duration::from_micros((period_us/2) as u64);
+        let half_us = (period_us / 2) as u64;
 
         for _ in 0..steps {
             self.step.set_high().ok();
-            timer.delay(half).ok();
+            timer.delay(half_us).ok();
 
             self.step.set_low().ok();
-            timer.delay(half).ok();
+            timer.delay(half_us).ok();
 
             match direction {
                 Direction::Clockwise => self.pos+=1,
@@ -96,6 +96,5 @@ where
             }
         }
         self.en.set_high().ok();
-    }
     pub fn home(&mut self) {}
 }
