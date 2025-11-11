@@ -1,5 +1,4 @@
 mod bluetooth;
-mod engine;
 mod motion;
 mod events;
 mod sense;
@@ -8,6 +7,7 @@ use sense::Sense;
 use esp_idf_svc::hal::prelude::*;
 use esp_idf_svc::hal::peripherals::Peripherals;
 use esp_idf_svc::hal::i2c::{I2cDriver, config::Config};
+use engine::Engine;
 
 use crate::motion::Stepper;
 
@@ -38,6 +38,8 @@ fn main() -> anyhow::Result<()> {
 
     let mut m1 = Stepper::new(step1, dir1, en1);
     let mut m2 = Stepper::new(step2, dir2, en2);
+
+    let engine = Engine::new();
 
     Ok(())
 }
