@@ -1,8 +1,13 @@
 use esp_idf_svc::hal::gpio::{Level, Output, OutputPin, Pin, PinDriver};
-use esp_idf_svc::hal::timer::TimerDriver;
-use core::time::Duration;
+use esp_idf_svc::timer::{EspTimer, EspTimerService};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 type OutputPinDriver<'a, Pin> = PinDriver<'a, Pin, Output>;
+
+pub trait StepperDriver {
+    fn enable(&
+}
 
 pub struct MoveInstruction {
     /* 
@@ -19,16 +24,19 @@ pub struct MoveInstruction {
 
 impl MoveInstruction {
     pub fn new(coords: Vec<u8>, drags: Vec<bool>) -> Self {
+        assert_eq!(coords.len(), drags.len());
         Self { coords, drags }
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (&u8, &bool)> + '_ {
-        self.coords.iter().zip(self.drags.iter())
+        self.coords
+        .iter()
+        .zip(self.drags.iter())
     }
 }
 
 
-#[derive(PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum Direction {
     Clockwise,
     CounterClockwise
@@ -38,20 +46,29 @@ enum Direction {
 /* 
 input will always be a list of operations to perform.
 */
-// pub struct CoreXY {
-//     m1: Stepper,
-//     m2: Stepper,
-// }
+const TICK_US: u64 = 50; // todo: tune this later
+pub struct CoreXY<'a, Lstep, Ldir, Len, Rstep, Rdir, Ren>
+where 
+    Lstep: Pin,
+    Ldir: Pin,
+    Len: Pin,
+    Rstep: Pin,
+    Rdir: Pin,
+    Ren: Pin
+{
+    l: Stepper<'a, Lstep, Ldir, Len>,
+    r: Stepper<'a, Rstep, Rdir, Ren>,
+}
 
 
 // eventually this will be private. you just pass pins into CoreXY and it builds two Steppers
 pub struct Stepper<'a, StepPin, DirPin, EnPin>
 where
-    StepPin: Pin,
+    StepPin:Pin,
     DirPin: Pin,
     EnPin: Pin,
 {
-    pos: u32, 
+    pos: i32, 
     step: OutputPinDriver<'a, StepPin>,
     dir: OutputPinDriver<'a, DirPin>,
     en: OutputPinDriver<'a, EnPin>,
@@ -59,9 +76,9 @@ where
 
 impl<'a, StepPin, DirPin, EnPin> Stepper<'a, StepPin, DirPin, EnPin>
 where
-    StepPin: OutputPin + Pin,
-    DirPin: OutputPin + Pin,
-    EnPin: OutputPin + Pin,
+    StepPin: Pin,
+    DirPin: Pin,
+    EnPin: Pin,
 {
     pub fn new(
         step: OutputPinDriver<'a, StepPin>,
@@ -73,28 +90,24 @@ where
         }
     }
 
-    pub fn move_blocking(&mut self, timer: &mut TimerDriver<'_>, steps: u32, freq_hz: u32, direction: Direction) {
-        // todo: verify direction actually works this way
-        self.dir.set_level(if direction == Direction::Clockwise {Level::High} else {Level::Low}).unwrap();
+    pub fn enable(&mut self) { self.en.set_low().ok(); }
+    pub fn disable(&mut self) { self.en.set_high().ok(); }
 
-        // todo: is enable low or high when moving? 
-        self.en.set_low().unwrap();
-        
-        let period_us = 1_000_000u32 / freq_hz; 
-        let half_us = (period_us / 2) as u64;
+    pub fn set_direction(&mut self, direction: Direction) {
+        let level = match direction {
+            Direction::Clockwise => Level::High,
+            Direction::CounterClockwise => Level::Low
+        };
+        self.dir.set_level(level).ok();
+    }
 
-        for _ in 0..steps {
-            self.step.set_high().ok();
-            timer.delay(half_us).ok();
+    pub fn step_once(&mut self, direction: Direction) {
+        self.set_direction(direction);
+        self.step.set_high().ok();
+        self.step.set_low().ok();
 
-            self.step.set_low().ok();
-            timer.delay(half_us).ok();
+        self.pos += if direction == Direction::Clockwise { 1 } else { -1 };
+    }
 
-            match direction {
-                Direction::Clockwise => self.pos+=1,
-                Direction::CounterClockwise => self.pos-=1,
-            }
-        }
-        self.en.set_high().ok();
-    pub fn home(&mut self) {}
+    pub fn pos(&self) -> i32 { self.pos }
 }
