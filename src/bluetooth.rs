@@ -27,12 +27,7 @@ impl BLE {
 
         let service = server.create_service(svc_uuid);
 
-        let rx_char =  {
-            let mut svc = service.lock(); 
-            svc.create_characteristic(rx_uuid, NimbleProperties::READ | NimbleProperties::WRITE| NimbleProperties::NOTIFY);
-        };
 
 
-        
     }
 }
