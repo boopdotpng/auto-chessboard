@@ -9,9 +9,9 @@ use esp_idf_svc::hal::peripherals::Peripherals;
 use esp_idf_svc::hal::i2c::{I2cDriver, config::Config};
 use engine::Engine;
 
-use crate::motion::Stepper;
+use crate::motion::{CoreXY, Stepper};
 
-fn main() -> anyhow::Result<()> {
+fn main() {
     esp_idf_svc::sys::link_patches();
     esp_idf_svc::log::EspLogger::initialize_default();
 
@@ -34,12 +34,22 @@ fn main() -> anyhow::Result<()> {
     let en2 = PinDriver::output(pins.gpio15).unwrap();
     let dir2 = PinDriver::output(pins.gpio16).unwrap();
 
-    let mut sense = Sense::new(i2c);
+    let magnet = PinDriver::output(pins.gpio17).unwrap();
+    let left_limit = PinDriver::input(pins.gpio18).unwrap();
+    let right_limit = PinDriver::input(pins.gpio19).unwrap();
 
-    let mut m1 = Stepper::new(step1, dir1, en1);
-    let mut m2 = Stepper::new(step2, dir2, en2);
+    let _sense = Sense::new(i2c);
 
-    let engine = Engine::new();
+    let stepper_x = Stepper::new(step1, dir1, en1);
+    let stepper_y = Stepper::new(step2, dir2, en2);
 
-    Ok(())
+    let mut core_xy = CoreXY::new(stepper_x, stepper_y, magnet, left_limit, right_limit);
+    core_xy.home();
+
+    let _engine = Engine::new();
+
+
+    loop {
+
+    }
 }
