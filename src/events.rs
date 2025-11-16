@@ -2,6 +2,23 @@
 use crate::sense::BoardChangeEvent;
 use std::sync::mpsc::{channel, Receiver, Sender};
 
+pub enum CodecError {
+    TooLarge,
+    Invalid
+}
+
+// turn any event into a string or bytes to send over bluetooth
+pub trait EventCodec: Sized {
+    type Wire: AsRef<[u8]> + From<Vec<u8>>;
+    fn encode(&self) -> Result<Self::Wire, CodecError>;
+    fn decode(bytes: &[u8]) -> Result<Self, CodecError>;
+}
+
+pub trait EventHandler {
+    fn interested_in(&self) -> &'static [EventKind];
+    fn handle(&mut self, evt: &Event) -> anyhow::Result<()>;
+}
+
 pub enum Event {
     Bt(BtEvent),
     Move(CoreXyEvent),
@@ -9,33 +26,63 @@ pub enum Event {
     BoardChanged(BoardChangeEvent),
 }
 
+#[derive(Clone, Copy, Eq, PartialEq, Hash)]
+pub enum EventKind {
+    Bt, 
+    CoreXY, 
+    Engine, 
+    BoardChanged,
+}
+
+impl From<&Event> for EventKind {
+    fn from(value: &Event) -> Self {
+        match value {
+            Event::Bt(_) => EventKind::Bt,
+            Event::Move(_) => EventKind::CoreXY,
+            Event::Engine(_) => EventKind::Engine,
+            Event::BoardChanged(_) => EventKind::BoardChanged,
+        }
+    }
+}
+
 pub type EventSender = Sender<Event>;
 pub type EventReceiver = Receiver<Event>;
 
-pub fn bus() -> (EventSender, EventReceiver) {
-    channel()
+pub struct EventBus {
+    sender: EventSender,
+    receiver: EventReceiver,
+    handlers: Vec<Box<dyn EventHandler + Send>>,
 }
 
-pub fn dispatcher(rx: EventReceiver, bt_tx: EventSender) -> anyhow::Result<()> {
-    for event in rx {
-        match event {
-            Event::Bt(bt_event) => {
-                // do things
-                bt_tx.send(Event::Bt(bt_event))?;
-            }
-            Event::Move(_core_event) => {
-                // do things
-            }
-            Event::Engine(_engine_event) => {
-                // do things
-            }
-            Event::BoardChanged(_board_event) => {
-                // do things
-            }
+impl EventBus {
+    pub fn new() -> Self {
+        let (sender, receiver) = channel();
+        Self {
+            sender,
+            receiver,
+            handlers: Vec::new(),
         }
     }
 
-    Ok(())
+    pub fn sender(&self) -> EventSender {
+        self.sender.clone()
+    }
+
+    pub fn register_handler(&mut self, handler: Box<dyn EventHandler + Send>) {
+        self.handlers.push(handler);
+    }
+
+    pub fn run(mut self) -> anyhow::Result<()> {
+        while let Ok(event) = self.receiver.recv() {
+            let kind = EventKind::from(&event);
+            for handler in self.handlers.iter_mut() {
+                if handler.interested_in().iter().any(|k| *k == kind) {
+                    let _ = handler.handle(&event);
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 // events sent from the phone app to the esp32

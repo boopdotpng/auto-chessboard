@@ -1,5 +1,5 @@
-use core::time::Duration;
-
+use std::sync::mpsc::Sender as EventSender;
+use std::sync::Arc;
 use esp32_nimble::{
     uuid128,
     BLEAdvertisementData,
@@ -8,10 +8,12 @@ use esp32_nimble::{
     BLECharacteristic,
 };
 use esp32_nimble::utilities::mutex::Mutex;
-use std::sync::Arc;
+use esp32_nimble::OnWriteArgs;
 
 struct BLE {
-    rx_char: Arc<Mutex<BLECharacteristic>>
+    rx_char: Arc<Mutex<BLECharacteristic>>, // phone -> board
+    tx_char: Arc<Mutex<BLECharacteristic>>, // board -> phone
+    app_tx: EventSender // into the event bus 
 }
 
 impl BLE {

@@ -3,7 +3,6 @@ mod motion;
 mod events;
 mod sense;
 use esp_idf_svc::hal::gpio::PinDriver;
-use esp_idf_svc::hal::ledc::config::TimerConfig;
 use esp_idf_svc::hal::timer::TimerDriver;
 use esp_idf_svc::hal::timer::config::Config;
 use sense::Sense;
@@ -11,7 +10,9 @@ use esp_idf_svc::hal::prelude::*;
 use esp_idf_svc::hal::peripherals::Peripherals;
 use esp_idf_svc::hal::i2c::{I2cDriver};
 use engine::Engine;
+use std::thread;
 
+use crate::events::EventBus;
 use crate::motion::{CoreXY, Stepper};
 
 fn main() {
@@ -41,20 +42,22 @@ fn main() {
     let left_limit = PinDriver::input(pins.gpio18).unwrap();
     let right_limit = PinDriver::input(pins.gpio19).unwrap();
 
-    let _sense = Sense::new(i2c);
-
     let stepper_x = Stepper::new(step1, dir1, en1);
     let stepper_y = Stepper::new(step2, dir2, en2);
 
     let timer_cfg = Config::new();
-    let mut core_xy_timer = TimerDriver::new(peripherals.timer00, &timer_cfg).unwrap();
+    let core_xy_timer = TimerDriver::new(peripherals.timer00, &timer_cfg).unwrap();
     let mut core_xy = CoreXY::new(stepper_x, stepper_y, magnet, left_limit, right_limit, core_xy_timer);
     core_xy.home();
 
     let _engine = Engine::new();
 
+    let bus = EventBus::new();
+    let sense_tx = bus.sender();
+    thread::spawn(move || {
+        let sense = Sense::new(i2c);
+        sense.run(sense_tx);
+    });
 
-    loop {
-
-    }
+    let _ = bus.run();
 }
