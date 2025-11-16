@@ -27,6 +27,7 @@ log = "0.4"
 esp-idf-svc = "0.51"
 anyhow = "1.0.100"
 engine = { path = "engine" }
+esp32-nimble = "=0.11.1"
 
 # --- Optional Embassy Integration ---
 # esp-idf-svc = { version = "0.51", features = ["critical-section", "embassy-time-driver", "embassy-sync"] }
