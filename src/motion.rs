@@ -1,4 +1,6 @@
 use esp_idf_svc::hal::gpio::{Input, Level, Output, Pin, PinDriver};
+use esp_idf_svc::hal::delay::Delay;
+use esp_idf_svc::hal::timer::TimerDriver;
 
 type OutputPinDriver<'a, Pin> = PinDriver<'a, Pin, Output>;
 type InputPinDriver<'a, Pin> = PinDriver<'a, Pin, Input>;
@@ -52,6 +54,7 @@ where
     magnet: OutputPinDriver<'a, MagnetPin>,
     left_limit: InputPinDriver<'a, LeftLimitPin>,
     right_limit: InputPinDriver<'a, RightLimitPin>,
+    timer: TimerDriver<'a>
 }
 
 impl<'a, LStepper, RStepper, MagnetPin, LeftLimitPin, RightLimitPin>
@@ -69,13 +72,16 @@ where
         magnet: OutputPinDriver<'a, MagnetPin>,
         left_limit: InputPinDriver<'a, LeftLimitPin>,
         right_limit: InputPinDriver<'a, RightLimitPin>,
+        mut timer: TimerDriver<'a>
     ) -> Self {
+        timer.enable(true).unwrap();
         let mut core = Self {
             left,
             right,
             magnet,
             left_limit,
             right_limit,
+            timer
         };
         core.set_magnet(false);
         core.home();
@@ -105,8 +111,38 @@ where
         let delta_a_steps = (dx_mm + dy_mm) * DEFAULT_STEPS_PER_MM as f32;
         let delta_b_steps = (dx_mm - dy_mm) * DEFAULT_STEPS_PER_MM as f32;
 
-        self.left.steps(delta_a_steps as i32);
-        self.right.steps(delta_b_steps as i32);
+        let mut steps_a = delta_a_steps.round() as i32;
+        let mut steps_b = delta_b_steps.round() as i32;
+
+        let dir_a = if steps_a >= 0 { Direction::Clockwise } else { Direction::CounterClockwise };
+        let dir_b = if steps_b >= 0 { Direction::Clockwise } else { Direction::CounterClockwise };
+
+        steps_a = steps_a.abs(); steps_b = steps_b.abs();
+
+        self.left.set_direction(dir_a); self.right.set_direction(dir_b);
+
+        let total = steps_a.max(steps_b).max(1); 
+        let mut acc_a = 0; 
+        let mut acc_b = 0; 
+
+        let tick_hz = self.timer.tick_hz();
+        let ticks_per_step = tick_hz / 2000 as u64; // todo! tune this
+
+        for _ in 0..total {
+            acc_a += steps_a; 
+            acc_b += steps_b; 
+            
+            if acc_a >= total {
+                self.left.step_once();
+                acc_a -= total;
+            }
+            if acc_b >= total {
+                self.right.step_once();
+                acc_b -= total;
+            }
+            
+            esp_idf_svc::hal::task::block_on(self.timer.delay(ticks_per_step)).unwrap();
+        }
     }
 
     pub fn consume_instructions(&mut self, instructions: MoveInstruction) {
@@ -244,7 +280,17 @@ where
     fn steps(&mut self, steps: i32) {
         // todo: create hardware timer based task here that moves stepper
         // should not be blocking, as in two steppers can move at the same time
-        self.set_direction(if steps > 0 {Direction::Clockwise} else { Direction::CounterClockwise });
-        todo!()
+        self.set_direction( if steps > 0 {
+            Direction::Clockwise
+        } else { 
+            Direction::CounterClockwise 
+        });
+        let count = steps.unsigned_abs();
+        let mut delay = Delay::new_default();
+
+        for _ in 0..count {
+            self.step_once();
+            delay.delay_us(500);
+        }
     }
 }
