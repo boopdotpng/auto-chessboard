@@ -1,8 +1,10 @@
 use crate::events::{Event, EventSender};
 use esp_idf_svc::hal::i2c::I2cDriver;
+use esp_idf_svc::hal::delay::BLOCK;
 use std::time::{Duration, Instant};
 
 const EVENT_TIMEOUT: Duration = Duration::from_secs(1);
+const PCF_BASE_ADDR: u8 = 0x20;
 
 pub struct BoardChangeEvent {
 
@@ -29,11 +31,32 @@ impl Sense {
         }
     }
 
+    // you need to set each pin on the exapnder as an inputs 
+    fn init_as_inputs(&mut self) {
+        let all_high = [0xFFu8, 0xFFu8];
+        for i in 0..4 {
+            let addr = PCF_BASE_ADDR + i as u8;
+            let _ = self.i2c.write(addr, &all_high, BLOCK);
+        }
+    }
+
     // one full board scan
     fn scan(&mut self) -> u64 {
-        // 64-bitfield, 0 if piece is present.
-        // will be 4 i2c 1x16 multiplexers that read back a value into some gpio pin
-        0
+        // 64-bitfield, 1 if piece is present.
+        // will be 4 i2c 1x16 multiplexers that read back a value into some gpio pin (PCF8575)
+        // address 0x20 to 0x27 dependinng on how a0-a2 are configured.
+        // todo! verify actual addresses
+        let mut state = 0u64;
+        for i in 0..4 {
+            let addr = PCF_BASE_ADDR + i as u8;
+            // 2 bytes: 16 values
+            let mut buf = [0u8; 2];
+            self.i2c.read(addr, &mut buf, BLOCK);
+
+            state |= (u16::from_le_bytes(buf) as u64) << ( (i*16) as u32 );
+        }
+
+        state
     }
 
     // event processing
