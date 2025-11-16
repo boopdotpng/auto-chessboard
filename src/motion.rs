@@ -84,7 +84,8 @@ where
             timer
         };
         core.set_magnet(false);
-        core.home();
+        // todo!(): re-enable homing once limit switches are verified
+        // core.home();
         core
     }
 
@@ -153,37 +154,36 @@ where
     }
 
     pub fn home(&mut self) {
-        /*
-        this might be offset from the actual center of the 0th square.
-        might need to add some steps manually after the limit switch is hit
-        */
+        todo!("Re-enable homing once limit switches are wired correctly");
+        // this might be offset from the actual center of the 0th square.
+        // might need to add some steps manually after the limit switch is hit
         // home one axis at a time
         // todo: set individual tasks to run these to completion, on a hardware timer
-        loop {
-            let left = match self.left_limit.get_level() {
-                Level::High => true,
-                Level::Low => false,
-            };
-            if left {
-                break;
-            }
-            self.left.steps(100);
-            self.right.steps(100);
-        }
-        loop {
-            let right = match self.right_limit.get_level() {
-                Level::High => true,
-                Level::Low => false,
-            };
-            if right {
-                break;
-            }
-            self.left.steps(100);
-            self.right.steps(100);
-        }
-
-        self.left.reset_position();
-        self.right.reset_position();
+        // loop {
+        //     let left = match self.left_limit.get_level() {
+        //         Level::High => true,
+        //         Level::Low => false,
+        //     };
+        //     if left {
+        //         break;
+        //     }
+        //     self.left.steps(100);
+        //     self.right.steps(100);
+        // }
+        // loop {
+        //     let right = match self.right_limit.get_level() {
+        //         Level::High => true,
+        //         Level::Low => false,
+        //     };
+        //     if right {
+        //         break;
+        //     }
+        //     self.left.steps(100);
+        //     self.right.steps(100);
+        // }
+        //
+        // self.left.reset_position();
+        // self.right.reset_position();
     }
 }
 

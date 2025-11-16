@@ -92,7 +92,7 @@ impl Sense {
     pub fn run(mut self, tx: EventSender) {
         loop {
             if let Some(evt) = self.tick(Instant::now()) {
-                let _ = tx.send(Event::BoardChanged(evt));
+                todo!()
             }
             std::thread::sleep(Duration::from_millis(500));
         }

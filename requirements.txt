@@ -1,0 +1,4 @@
+bleak==1.1.1
+chess==1.11.2
+dbus-fast==3.0.0
+python-chess==1.999

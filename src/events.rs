@@ -3,6 +3,52 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 pub type EventSender = Sender<Event>;
 pub type EventReceiver = Receiver<Event>;
 
+pub enum BleMessage {
+    RequestBattery,
+    BatteryReported { percent: u8, charging: bool },
+
+    RequestBoardPosition,
+    BoardPosition { fen: String },     // response
+    SetBoardPosition { fen: String },
+
+    MovePiece { from: u8, to: u8 },
+
+    RequestPgn,
+}
+
+pub enum CodecError {
+    TooLarge,
+    Invalid,
+}
+
+pub trait BleCodec {
+    type Wire: AsRef<[u8]> + From<Vec<u8>>;
+    fn encode(msg: &BleMessage) -> Result<Self::Wire, CodecError>;
+    fn decode(bytes: &[u8]) -> Result<BleMessage, CodecError>;
+}
+
+impl From<BleMessage> for Event {
+    fn from(msg: BleMessage) -> Self {
+        match msg {
+            BleMessage::RequestBattery => Event::RequestBattery,
+            BleMessage::BatteryReported { percent, charging } =>
+                Event::BatteryReported { percent, charging },
+
+            BleMessage::RequestBoardPosition => Event::RequestBoardPosition,
+            BleMessage::BoardPosition { fen } =>
+                Event::BoardPositionUpdated { fen },
+
+            BleMessage::SetBoardPosition { fen } =>
+                Event::SetBoardPosition { fen },
+
+            BleMessage::MovePiece { from, to } =>
+                Event::MovePiece { from, to },
+            
+            BleMessage::RequestPgn => Event::RequestPgn,
+        }
+    }
+}
+
 pub trait EventHandler {
     fn handle(&mut self, evt: &Event) -> anyhow::Result<()>;
 }
@@ -44,29 +90,39 @@ impl EventBus {
     }
 }
 
+/*
+typical flow for a bluetooth event:
+phone sends RequestPgn.
+bluetooth handler receives it, publishes RequestPgn on the bus,
+GameState consumes it, builds the PGN, then emits SendPgn { pgn }
+which the bluetooth handler forwards back to the phone.
+*/
 pub enum Event {
-    // power / battery
+    // --- telemetry / BLE round-trips ---
     RequestBattery,
     BatteryReported {
         percent: u8,
         charging: bool,
     },
-
-    // board state
     RequestBoardPosition,
-    SetBoardPosition { fen: String },
-    BoardPositionUpdated {fen: String },
+    BoardPositionUpdated {
+        fen: String,
+    },
+    RequestPgn,
+    SendPgn {
+        pgn: String,
+    },
 
-    // moves
+    // --- board / engine coordination ---
+    SetBoardPosition {
+        fen: String,
+    },
     MovePiece {
         from: u8,
         to: u8,
     },
-    RequestPgn {
-        pgn: String
-    },
 
-    // local hardware / motion 
+    // --- local hardware / motion ---
     MotionCommand(CoreXyCommand),
     MotionFinished,
 }
