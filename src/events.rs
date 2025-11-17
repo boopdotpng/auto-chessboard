@@ -163,6 +163,12 @@ pub enum Event {
         from: u8,
         to: u8,
     },
+    InvalidMove,
+    Promotion {
+        piece: u8,
+        square: u8,
+    },
+    UndoLastMove,
 
     // --- local hardware / motion ---
     MotionCommand(CoreXyCommand),
