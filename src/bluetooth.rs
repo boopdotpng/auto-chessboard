@@ -1,15 +1,15 @@
+use std::convert::TryFrom;
 use std::sync::Arc;
 use esp32_nimble::{
-    uuid128,
-    BLEAdvertisementData,
-    BLEDevice,
-    NimbleProperties,
-    BLECharacteristic,
+    BLEAdvertisementData, BLECharacteristic, BLEDevice, NimbleProperties, OnWriteArgs, uuid128
 };
 use esp32_nimble::utilities::mutex::Mutex;
 
-use crate::events::{EventHandler, EventSender};
+use crate::events::{
+    BleCodec, BleMessage, Event, EventHandler, EventSender, SimpleBleCodec,
+};
 
+// nordic uart service -- a serial port over BLE
 const SVC_UUID: &str = "6E400001-B5A3-F393-E0A9-E50E24DCCA9E";
 const RX_UUID:  &str = "6E400002-B5A3-F393-E0A9-E50E24DCCA9E"; // phone -> board (WRITE/WRITE_NO_RSP)
 const TX_UUID:  &str = "6E400003-B5A3-F393-E0A9-E50E24DCCA9E"; // board -> phone (NOTIFY)
@@ -48,6 +48,25 @@ impl BLE {
 
         tx_char.lock().set_value(b"");
 
+        let sender_clone = sender.clone();
+
+        // on notify for rx char; this will parse cmds.
+        rx_char.lock().on_write(move |args: &mut OnWriteArgs| {
+           let data = args.recv_data(); 
+
+           match SimpleBleCodec::decode(data) {
+               Ok(msg) => {
+                   let event: Event = msg.into();
+                   if let Err(err) = sender_clone.send(event) {
+                       log::warn!("failed to forward BLE message to bus: {err}");
+                   }
+               }
+               Err(err) => {
+                   log::warn!("failed to decode BLE payload: {err:?}");
+               }
+           }
+        });
+
         server.start().unwrap();
 
         advertising
@@ -68,13 +87,25 @@ impl BLE {
         }
 
     }
+
+    fn send_message(&self, msg: &BleMessage) {
+        let mut tx = self.tx_char.lock(); 
+        match SimpleBleCodec::encode(msg) {
+            Ok(payload) => {
+                tx.set_value(payload.as_ref()); 
+                tx.notify();
+            }
+            Err(err) => log::warn!("failed to encode BLE message: {err:?}"),
+        }
+    }
 }
 
+// all the sending of things will happen here, over the rx characteristic.
 impl EventHandler for BLE {
     fn handle(&mut self, evt: &crate::events::Event) -> anyhow::Result<()> {
-       match evt {
-        _ => {}
-       }
-       Ok(()) 
+        if let Ok(msg) = BleMessage::try_from(evt) {
+            self.send_message(&msg);
+        }
+        Ok(()) 
     }
 }

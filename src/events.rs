@@ -1,3 +1,15 @@
+/*
+BLE protocol overview:
+  * All frames are ASCII `CMD payload`.
+  * Simple commands without data: `REQ_BAT`, `REQ_BOARD`, `REQ_PGN`.
+  * Numeric data: `BAT <percent> <0|1>`, `MOVE <from> <to>`.
+  * String data (FEN/PGN): `BOARD len:payload`, `SET_BOARD len:payload`, `PGN len:payload`
+    where `len` is the byte-count of the UTF-8 payload that follows the colon.
+BLE message variants map one-to-one with internal `Event` variants that need BLE I/O.
+*/
+
+use std::convert::TryFrom;
+use std::fmt::Write as _;
 use std::sync::mpsc::{channel, Receiver, Sender};
 
 pub type EventSender = Sender<Event>;
@@ -14,10 +26,11 @@ pub enum BleMessage {
     MovePiece { from: u8, to: u8 },
 
     RequestPgn,
+    SendPgn { pgn: String },
 }
 
+#[derive(Debug)]
 pub enum CodecError {
-    TooLarge,
     Invalid,
 }
 
@@ -45,6 +58,23 @@ impl From<BleMessage> for Event {
                 Event::MovePiece { from, to },
             
             BleMessage::RequestPgn => Event::RequestPgn,
+            BleMessage::SendPgn { pgn } => Event::SendPgn { pgn },
+        }
+    }
+}
+
+impl TryFrom<&Event> for BleMessage {
+    type Error = ();
+
+    fn try_from(evt: &Event) -> Result<Self, Self::Error> {
+        match evt {
+            Event::BatteryReported { percent, charging } =>
+                Ok(BleMessage::BatteryReported { percent: *percent, charging: *charging }),
+            Event::BoardPositionUpdated { fen } =>
+                Ok(BleMessage::BoardPosition { fen: fen.clone() }),
+            Event::SendPgn { pgn } =>
+                Ok(BleMessage::SendPgn { pgn: pgn.clone() }),
+            _ => Err(()),
         }
     }
 }
@@ -80,7 +110,7 @@ impl EventBus {
     pub fn run(mut self) -> anyhow::Result<()> {
         while let Ok(event) = self.receiver.recv() {
             for handler in self.handlers.iter_mut() {
-                if let Err(e) = handler.handle(&event) {
+                if let Err(_e) = handler.handle(&event) {
                     todo!();
                 }
             }
@@ -130,4 +160,125 @@ pub enum Event {
 pub enum CoreXyCommand {
     Home,
     GotoMM {x: u32, y: u32},
+}
+
+pub struct SimpleBleCodec;
+
+impl SimpleBleCodec {
+    fn encode_string_message(cmd: &str, payload: &str) -> Vec<u8> {
+        let mut out = String::new();
+        let _ = write!(&mut out, "{} {}:{}", cmd, payload.as_bytes().len(), payload);
+        out.into_bytes()
+    }
+
+    fn decode_string_payload(payload: &str) -> Result<String, CodecError> {
+        let (len_part, data_part) = payload
+            .split_once(':')
+            .ok_or(CodecError::Invalid)?;
+        let expected_len: usize = len_part.parse().map_err(|_| CodecError::Invalid)?;
+        if data_part.as_bytes().len() != expected_len {
+            return Err(CodecError::Invalid);
+        }
+        Ok(data_part.to_string())
+    }
+
+    fn parse_bool(token: &str) -> Result<bool, CodecError> {
+        match token {
+            "0" => Ok(false),
+            "1" => Ok(true),
+            _ => Err(CodecError::Invalid),
+        }
+    }
+}
+
+impl BleCodec for SimpleBleCodec {
+    type Wire = Vec<u8>;
+
+    fn encode(msg: &BleMessage) -> Result<Self::Wire, CodecError> {
+        Ok(match msg {
+            BleMessage::RequestBattery => b"REQ_BAT".to_vec(),
+            BleMessage::BatteryReported { percent, charging } => {
+                let mut out = String::new();
+                let _ = write!(
+                    &mut out,
+                    "BAT {} {}",
+                    percent,
+                    if *charging { 1 } else { 0 }
+                );
+                out.into_bytes()
+            }
+            BleMessage::RequestBoardPosition => b"REQ_BOARD".to_vec(),
+            BleMessage::BoardPosition { fen } =>
+                Self::encode_string_message("BOARD", fen),
+            BleMessage::SetBoardPosition { fen } =>
+                Self::encode_string_message("SET_BOARD", fen),
+            BleMessage::MovePiece { from, to } => {
+                let mut out = String::new();
+                let _ = write!(&mut out, "MOVE {} {}", from, to);
+                out.into_bytes()
+            }
+            BleMessage::RequestPgn => b"REQ_PGN".to_vec(),
+            BleMessage::SendPgn { pgn } =>
+                Self::encode_string_message("PGN", pgn),
+        })
+    }
+
+    fn decode(bytes: &[u8]) -> Result<BleMessage, CodecError> {
+        let text = core::str::from_utf8(bytes).map_err(|_| CodecError::Invalid)?;
+        let (cmd, rest) = text
+            .split_once(' ')
+            .map(|(c, r)| (c, Some(r)))
+            .unwrap_or((text, None));
+
+        match cmd {
+            "REQ_BAT" => Ok(BleMessage::RequestBattery),
+            "BAT" => {
+                let payload = rest.ok_or(CodecError::Invalid)?;
+                let mut fields = payload.split_whitespace();
+                let percent = fields
+                    .next()
+                    .ok_or(CodecError::Invalid)?
+                    .parse::<u8>()
+                    .map_err(|_| CodecError::Invalid)?;
+                let charging = fields
+                    .next()
+                    .ok_or(CodecError::Invalid)
+                    .and_then(Self::parse_bool)?;
+                Ok(BleMessage::BatteryReported { percent, charging })
+            }
+            "REQ_BOARD" => Ok(BleMessage::RequestBoardPosition),
+            "BOARD" => {
+                let payload = rest.ok_or(CodecError::Invalid)?;
+                let fen = Self::decode_string_payload(payload)?;
+                Ok(BleMessage::BoardPosition { fen })
+            }
+            "SET_BOARD" => {
+                let payload = rest.ok_or(CodecError::Invalid)?;
+                let fen = Self::decode_string_payload(payload)?;
+                Ok(BleMessage::SetBoardPosition { fen })
+            }
+            "MOVE" => {
+                let payload = rest.ok_or(CodecError::Invalid)?;
+                let mut fields = payload.split_whitespace();
+                let from = fields
+                    .next()
+                    .ok_or(CodecError::Invalid)?
+                    .parse::<u8>()
+                    .map_err(|_| CodecError::Invalid)?;
+                let to = fields
+                    .next()
+                    .ok_or(CodecError::Invalid)?
+                    .parse::<u8>()
+                    .map_err(|_| CodecError::Invalid)?;
+                Ok(BleMessage::MovePiece { from, to })
+            }
+            "REQ_PGN" => Ok(BleMessage::RequestPgn),
+            "PGN" => {
+                let payload = rest.ok_or(CodecError::Invalid)?;
+                let pgn = Self::decode_string_payload(payload)?;
+                Ok(BleMessage::SendPgn { pgn })
+            }
+            _ => Err(CodecError::Invalid),
+        }
+    }
 }

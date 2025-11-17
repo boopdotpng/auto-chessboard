@@ -1,19 +1,18 @@
-use crate::events::{Event, EventSender};
-use esp_idf_svc::hal::i2c::I2cDriver;
 use esp_idf_svc::hal::delay::BLOCK;
+use esp_idf_svc::hal::i2c::I2cDriver;
 use std::time::{Duration, Instant};
 
 const EVENT_TIMEOUT: Duration = Duration::from_secs(1);
 const PCF_BASE_ADDR: u8 = 0x20;
 
-pub struct BoardChangeEvent {
-
+pub struct BoardChange {
+    pub mask: u64,
+    pub state: u64,
 }
 
 pub struct Sense {
     i2c: I2cDriver<'static>,
     current_state: u64,
-    previous_scan: u64,
     last_change: Option<Instant>,
     event_active: bool,
     event_mask: u64,
@@ -21,9 +20,8 @@ pub struct Sense {
 
 impl Sense {
     pub fn new(i2c: I2cDriver<'static>) -> Self {
-        Self { 
-            i2c, 
-            previous_scan: 0u64, 
+        Self {
+            i2c,
             current_state: 0u64,
             last_change: None,
             event_active: false,
@@ -60,7 +58,7 @@ impl Sense {
     }
 
     // event processing
-    fn tick(&mut self, now: Instant) -> Option<BoardChangeEvent> {
+    fn tick(&mut self, now: Instant) -> Option<BoardChange> {
         let new_state = self.scan();
         let diff = self.current_state ^ new_state;
         if diff != 0 {
@@ -79,22 +77,17 @@ impl Sense {
             if let Some(last) = self.last_change {
                 if now.duration_since(last) >= EVENT_TIMEOUT {
                     self.event_active = false;
+                    let mask = self.event_mask;
                     self.event_mask = 0;
                     self.last_change = None;
-                    return Some(BoardChangeEvent {});
+                    return Some(BoardChange {
+                        mask,
+                        state: self.current_state,
+                    });
                 }
             }
-        }  
+        }
 
         None
-    }
-
-    pub fn run(mut self, tx: EventSender) {
-        loop {
-            if let Some(evt) = self.tick(Instant::now()) {
-                todo!()
-            }
-            std::thread::sleep(Duration::from_millis(500));
-        }
     }
 }

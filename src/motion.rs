@@ -1,4 +1,4 @@
-use esp_idf_svc::hal::gpio::{Input, Level, Output, Pin, PinDriver};
+use esp_idf_svc::hal::gpio::{Input, Output, Pin, PinDriver};
 use esp_idf_svc::hal::delay::Delay;
 use esp_idf_svc::hal::timer::TimerDriver;
 
@@ -286,7 +286,7 @@ where
             Direction::CounterClockwise 
         });
         let count = steps.unsigned_abs();
-        let mut delay = Delay::new_default();
+        let delay = Delay::new_default();
 
         for _ in 0..count {
             self.step_once();
