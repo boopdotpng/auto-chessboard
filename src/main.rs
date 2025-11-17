@@ -1,11 +1,8 @@
 mod bluetooth;
-mod led;
 mod motion;
 mod events;
 mod sense;
 mod game;
-
-use std::{thread, time::Duration};
 
 use esp_idf_svc::hal::gpio::PinDriver;
 use esp_idf_svc::hal::timer::TimerDriver;
@@ -64,11 +61,6 @@ fn main() {
     let bluetooth = BLE::new(event_bus.sender());
     event_bus.register_handler(Box::new(bluetooth));
     log::info!("BLE advertising started, entering event loop");
-
-    let _heartbeat = thread::spawn(|| loop {
-        log::info!("heartbeat: main loop alive");
-        thread::sleep(Duration::from_secs(5));
-    });
 
     if let Err(err) = event_bus.run() {
         log::error!("event bus stopped: {err:?}");
