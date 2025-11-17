@@ -1,8 +1,8 @@
 /*
 BLE protocol overview:
   * All frames are ASCII `CMD payload`.
-  * Simple commands without data: `REQ_BAT`, `REQ_BOARD`, `REQ_PGN`.
-  * Numeric data: `BAT <percent> <0|1>`, `MOVE <from> <to>`.
+  * Simple commands without data: `REQ_BAT`, `REQ_BOARD`, `REQ_PGN`, `MOTION_HOME`, `MOTION_FINISHED`.
+  * Numeric data: `BAT <percent> <0|1>`, `MOVE <from> <to>`, `MOTION_GOTO <x_mm> <y_mm>`.
   * String data (FEN/PGN): `BOARD len:payload`, `SET_BOARD len:payload`, `PGN len:payload`
     where `len` is the byte-count of the UTF-8 payload that follows the colon.
 BLE message variants map one-to-one with internal `Event` variants that need BLE I/O.
@@ -27,6 +27,10 @@ pub enum BleMessage {
 
     RequestPgn,
     SendPgn { pgn: String },
+
+    MotionHome,
+    MotionGoto { x_mm: u32, y_mm: u32 },
+    MotionFinished,
 }
 
 #[derive(Debug)]
@@ -59,6 +63,12 @@ impl From<BleMessage> for Event {
             
             BleMessage::RequestPgn => Event::RequestPgn,
             BleMessage::SendPgn { pgn } => Event::SendPgn { pgn },
+
+            BleMessage::MotionHome =>
+                Event::MotionCommand(CoreXyCommand::Home),
+            BleMessage::MotionGoto { x_mm, y_mm } =>
+                Event::MotionCommand(CoreXyCommand::GotoMM { x: x_mm, y: y_mm }),
+            BleMessage::MotionFinished => Event::MotionFinished,
         }
     }
 }
@@ -74,6 +84,8 @@ impl TryFrom<&Event> for BleMessage {
                 Ok(BleMessage::BoardPosition { fen: fen.clone() }),
             Event::SendPgn { pgn } =>
                 Ok(BleMessage::SendPgn { pgn: pgn.clone() }),
+            Event::MotionFinished =>
+                Ok(BleMessage::MotionFinished),
             _ => Err(()),
         }
     }
@@ -220,6 +232,13 @@ impl BleCodec for SimpleBleCodec {
             BleMessage::RequestPgn => b"REQ_PGN".to_vec(),
             BleMessage::SendPgn { pgn } =>
                 Self::encode_string_message("PGN", pgn),
+            BleMessage::MotionHome => b"MOTION_HOME".to_vec(),
+            BleMessage::MotionGoto { x_mm, y_mm } => {
+                let mut out = String::new();
+                let _ = write!(&mut out, "MOTION_GOTO {} {}", x_mm, y_mm);
+                out.into_bytes()
+            }
+            BleMessage::MotionFinished => b"MOTION_FINISHED".to_vec(),
         })
     }
 
@@ -278,6 +297,23 @@ impl BleCodec for SimpleBleCodec {
                 let pgn = Self::decode_string_payload(payload)?;
                 Ok(BleMessage::SendPgn { pgn })
             }
+            "MOTION_HOME" => Ok(BleMessage::MotionHome),
+            "MOTION_GOTO" => {
+                let payload = rest.ok_or(CodecError::Invalid)?;
+                let mut fields = payload.split_whitespace();
+                let x_mm = fields
+                    .next()
+                    .ok_or(CodecError::Invalid)?
+                    .parse::<u32>()
+                    .map_err(|_| CodecError::Invalid)?;
+                let y_mm = fields
+                    .next()
+                    .ok_or(CodecError::Invalid)?
+                    .parse::<u32>()
+                    .map_err(|_| CodecError::Invalid)?;
+                Ok(BleMessage::MotionGoto { x_mm, y_mm })
+            }
+            "MOTION_FINISHED" => Ok(BleMessage::MotionFinished),
             _ => Err(CodecError::Invalid),
         }
     }
