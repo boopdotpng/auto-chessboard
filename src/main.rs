@@ -12,7 +12,7 @@ use esp_idf_svc::hal::peripherals::Peripherals;
 use esp_idf_svc::hal::i2c::I2cDriver;
 
 use bluetooth::BLE;
-use motion::{CoreXY, Stepper};
+use motion::{CoreXY, Stepper, Microstep};
 use events::EventBus;
 
 fn main() {
@@ -52,7 +52,15 @@ fn main() {
 
     let timer_cfg = Config::new();
     let core_xy_timer = TimerDriver::new(peripherals.timer00, &timer_cfg).unwrap();
-    let _core_xy = CoreXY::new(stepper_x, stepper_y, magnet, left_limit, right_limit, core_xy_timer);
+    let mut core_xy = CoreXY::new(
+        stepper_x,
+        stepper_y,
+        magnet,
+        left_limit,
+        right_limit,
+        core_xy_timer,
+        Microstep::Sixteen,
+    );
     log::warn!("CoreXY homing temporarily disabled (limit switches not verified)");
 
     let mut event_bus = EventBus::new();
@@ -65,4 +73,6 @@ fn main() {
     if let Err(err) = event_bus.run() {
         log::error!("event bus stopped: {err:?}");
     }
+    
+    core_xy.goto(12);
 }

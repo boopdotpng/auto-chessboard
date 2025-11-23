@@ -10,6 +10,14 @@ pub struct Game {
     engine: Engine
 }
 
+impl Game {
+    pub fn new() -> Self {
+        Self {
+            engine: Engine::new()
+        }
+    }
+}
+
 impl EventHandler for Game {
     fn handle(&mut self, evt: &crate::events::Event) -> anyhow::Result<()> {
        match evt {
