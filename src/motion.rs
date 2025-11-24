@@ -4,32 +4,25 @@ use esp_idf_svc::hal::timer::TimerDriver;
 
 type OutputPinDriver<'a, Pin> = PinDriver<'a, Pin, Output>;
 type InputPinDriver<'a, Pin> = PinDriver<'a, Pin, Input>;
+// 1.25" squares
 const SQUARE_SIZE_MM: f32 = 31.75;
 
-/// MS1/MS2 jumper settings for the TMC2209 (assumes MS3/SPREAD are low).
-#[repr(u8)]
+// MS1/MS2 jumper settings for the TMC2209 (assumes MS3/SPREAD are low).
+// spread low = stealthChop | high -> spreadCycle
+// these will be hardcoded (no need to use additional gpio ports) 
+// but this needs to be synced with the actual ms1/ms2
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Microstep {
-    //      ms1 2
-    Eight = 0b00, 
-    Sixteen = 0b11,
-    ThirtyTwo = 0b10,
-    SixtyFour = 0b01, 
+    //      ms1/2
+    Eight = 8, // low, low 
+    Sixteen = 16, // high, high
+    ThirtyTwo = 32, // high, low
+    SixtyFour = 64, // low, high
 }
 
 impl Microstep {
-    /// Returns the microstep multiplication factor (e.g. 1/16 → 16)
-    pub const fn factor(self) -> u32 {
-        match self {
-            Microstep::Eight => 8,
-            Microstep::Sixteen => 16,
-            Microstep::ThirtyTwo => 32,
-            Microstep::SixtyFour => 64,
-        }
-    }
-
     pub const fn steps_per_revolution(self, motor_steps_per_rev: u32) -> u32 {
-        motor_steps_per_rev * self.factor()
+        motor_steps_per_rev * self as u32
     }
 }
 
@@ -110,14 +103,6 @@ where
         self.delay_ticks(ticks_per_step);
     }
 
-    fn left_limit_active(&self) -> bool {
-        self.left_limit.is_low()
-    }
-
-    fn right_limit_active(&self) -> bool {
-        self.right_limit.is_low()
-    }
-
     fn drive_until<F>(&mut self, dir_left: Direction, dir_right: Direction, mut condition: F, max_steps: u32)
     where
         F: Fn(&Self) -> bool,
@@ -180,6 +165,7 @@ where
     }
 
     pub fn goto(&mut self, square: u32) {
+        // left motor, right motor
         let steps_per_mm = self.steps_per_mm();
         let (left_steps, right_steps) = (
             self.left.position() as f32,
@@ -236,7 +222,7 @@ where
         self.drive_until(
             Direction::CounterClockwise,
             Direction::CounterClockwise,
-            |s| s.left_limit_active(),
+            |s| s.left_limit.is_low(),
             Self::HOMING_MAX_STEPS,
         );
 
@@ -244,7 +230,7 @@ where
         self.drive_until(
             Direction::Clockwise,
             Direction::Clockwise,
-            |s| !s.left_limit_active(),
+            |s| !s.left_limit.is_low(),
             Self::HOMING_BACKOFF_STEPS,
         );
 
@@ -252,7 +238,7 @@ where
         self.drive_until(
             Direction::CounterClockwise,
             Direction::Clockwise,
-            |s| s.right_limit_active(),
+            |s| s.right_limit.is_low(),
             Self::HOMING_MAX_STEPS,
         );
 
@@ -260,7 +246,7 @@ where
         self.drive_until(
             Direction::Clockwise,
             Direction::CounterClockwise,
-            |s| !s.right_limit_active(),
+            |s| !s.right_limit.is_low(),
             Self::HOMING_BACKOFF_STEPS,
         );
 
@@ -270,13 +256,10 @@ where
 }
 
 pub trait StepperOps {
-    fn enable(&mut self);
-    fn disable(&mut self);
     fn set_direction(&mut self, direction: Direction);
     fn step_once(&mut self);
-    fn position(&self) -> u32;
+    fn position(&self) -> i32;
     fn reset_position(&mut self);
-    fn steps(&mut self, steps: i32);
 }
 
 pub struct Stepper<'a, StepPin, DirPin, EnPin>
@@ -285,7 +268,7 @@ where
     DirPin: Pin,
     EnPin: Pin,
 {
-    pos: u32,
+    pos: i32,
     step: OutputPinDriver<'a, StepPin>,
     dir: OutputPinDriver<'a, DirPin>,
     en: OutputPinDriver<'a, EnPin>,
@@ -321,11 +304,6 @@ where
     DirPin: Pin,
     EnPin: Pin,
 {
-    // todo! these are probably switched
-    fn enable(&mut self) { self.en.set_low().ok(); }
-
-    fn disable(&mut self) { self.en.set_high().ok(); }
-
     fn set_direction(&mut self, direction: Direction) {
         match direction {
             Direction::Clockwise => {
@@ -340,32 +318,22 @@ where
     }
 
     fn step_once(&mut self) {
-        self.step.set_high().ok();
+        self.step.set_high().ok(); 
+        let delay = Delay::new_default();
+        /* 
+        the delay is already higher than 1us due to function calls, but let's make it explicit. 
+         */
+        delay.delay_us(1);
         self.step.set_low().ok();
 
         if self.current_direction == Direction::Clockwise {
-            self.pos = self.pos.saturating_add(1);
+            self.pos += 1;
         } else {
-            self.pos = self.pos.saturating_sub(1);
+            self.pos -= 1; 
         }
     }
 
-    fn position(&self) -> u32 { self.pos }
+    fn position(&self) -> i32 { self.pos }
 
     fn reset_position(&mut self) { self.pos = 0; }
-
-    fn steps(&mut self, steps: i32) {
-        self.set_direction(if steps > 0 {
-            Direction::Clockwise
-        } else {
-            Direction::CounterClockwise
-        });
-        let count = steps.unsigned_abs();
-        let delay = Delay::new_default();
-
-        for _ in 0..count {
-            self.step_once();
-            delay.delay_us(500);
-        }
-    }
 }
